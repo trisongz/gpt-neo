@@ -41,7 +41,7 @@ def generic_text(params, eval=False, sample_text_fn=None):
 
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
     seed = params.get('seed', None)
-    deterministic =  seed is not None
+    deterministic =  seed is not None # what `deterministic` really does is mark if the code should be run in parallel
     num_parallel_calls = 1 if deterministic else tf.data.experimental.AUTOTUNE
 
     dataset = tf.data.Dataset.from_tensor_slices(files)

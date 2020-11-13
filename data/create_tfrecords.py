@@ -25,6 +25,7 @@ parser.add_argument("--mode", type=str, choices=["chunks", "documents"], default
 parser.add_argument("--base_dir", type=str, help="Path to where your files are located. Files ending in .zst are treated as \
                     archives, all others as raw text.")
 parser.add_argument("--files_per", type=int, default=200, help="Text files per tfrecord")
+parser.add_argument("--tfrecord_commit_every", type=int, default=-1, help="Commit to a new tfrecord every n documents/chunks. this is different from files_per when the input is made of archives.")
 parser.add_argument("--name", type=str, default="openwebtext",
                     help="Name of output files will be name_i.tfrecords where i is the number of the file")
 parser.add_argument("--output_dir", type=str, default="tfrecords", help="Where to put tfrecords")
@@ -194,14 +195,16 @@ class EncodedConcatenatedFiles(object):
 
 def create_file(params):
     idx, fns = params
-    s = args.name + "_" + str(idx) + ".tfrecords"
+    s = args.name + "_" + str(idx) + "_{}.tfrecords"
     if os.path.exists(os.path.join(args.log_dir,
                                    s)):  # Hack-y, if file of same name is in log dir, sign that the file is complete, so skip
         return 0
     if os.path.exists(os.path.join(args.output_dir, s)):  # Unfinished file, remove
         os.remove(os.path.join(args.output_dir, s))
 
-    with tf.io.TFRecordWriter(os.path.join(args.output_dir, s)) as writer:
+        
+    def _writer(s):
+        writer = tf.io.TFRecordWriter(os.path.join(args.output_dir, s))
         def _write_to_file(data, i):
             # Helper function to avoid code duplication, writes the data as an example to the file and increments i
             # hash = fn.split("/")[-1].split(".")[0]
@@ -212,32 +215,43 @@ def create_file(params):
             tf_example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(tf_example.SerializeToString())
             i += 1
+        return _write_to_file, writer
 
-        i = 0  # In document mode: Good files, in chunk mode: Number of chunks
-        if args.mode == "documents":
-            def _archive_to_files(f):
-                # Generator that yields the contents of the files in an archive
-                g = Reader(f).stream_data(threaded=False)
-                for s in g:
-                    yield BufferedEncodedStream(s, enc, [], not args.no_ftfy, args.minimum_size, text_mode=True).read()
+    i = 0  # In document mode: Good files, in chunk mode: Number of chunks
+    if args.mode == "documents":
+        def _archive_to_files(f):
+            # Generator that yields the contents of the files in an archive
+            g = Reader(f).stream_data(threaded=False)
+            writer = None
+            for j, s in enumerate(g):
+                if (j == 0 and args.tfrecord_commit_every == -1) or (j % args.tfrecord_commit_every == 0):
+                    if os.path.exists(os.path.join(args.log_dir,
+                                                   s.format(j))):  # Hack-y, if file of same name is in log dir, sign that the file is complete, so skip
+                        return
+                    if os.path.exists(os.path.join(args.output_dir, s.format(j))):  # Unfinished file, remove
+                        os.remove(os.path.join(args.output_dir, s.format(j)))
+                    if writer is not None: writer.close()
+                    _write_to_file, writer = _writer(s.format(j))
+                yield BufferedEncodedStream(s, enc, [], not args.no_ftfy, args.minimum_size, text_mode=True).read()
+            writer.close()
 
-            for fn in fns:
-                if fn.endswith(".zst") or fn.endswith(".xz") or fn.endswith("tar.gz"):
-                    data = _archive_to_files(fn)
-                else:
-                    data = [BufferedEncodedStream(fn, enc, args.separator, not args.no_ftfy, args.minimum_size).read()]
+        for fn in fns:
+            if fn.endswith(".zst") or fn.endswith(".xz") or fn.endswith("tar.gz"):
+                data = _archive_to_files(fn)
+            else:
+                data = [BufferedEncodedStream(fn, enc, args.separator, not args.no_ftfy, args.minimum_size).read()]
 
-                for d in data:
-                    _write_to_file(d, i)
+            for d in data:
+                _write_to_file(d, i)
 
-        elif args.mode == "chunks":
-            data_stream = EncodedConcatenatedFiles(fns, enc, separator=args.separator, fix=not args.no_ftfy,
-                                                   minimum_size=args.minimum_size)
-            data_stream = read_in_chunks(data_stream, args.chunk_size)
-            for chunk in data_stream:
-                if not chunk.shape[0] == args.chunk_size:  # Additional sanity check
-                    continue
-                _write_to_file(chunk, i)
+    elif args.mode == "chunks":
+        data_stream = EncodedConcatenatedFiles(fns, enc, separator=args.separator, fix=not args.no_ftfy,
+                                               minimum_size=args.minimum_size)
+        data_stream = read_in_chunks(data_stream, args.chunk_size)
+        for chunk in data_stream:
+            if not chunk.shape[0] == args.chunk_size:  # Additional sanity check
+                continue
+            _write_to_file(chunk, i)
 
     # File complete
     if args.mode == "documents":

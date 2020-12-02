@@ -3,7 +3,7 @@ import tensorflow.compat.v1 as tf
 from functools import partial
 from data.encoders import encode
 
-def generic_text(params, eval=False, sample_text_fn=None):
+def generic_text(params, eval=False, sample_text_fn=None, path=None):
     i = 0 if not eval else 1
     print('##############################')
     print(params["datasets"])
@@ -18,8 +18,9 @@ def generic_text(params, eval=False, sample_text_fn=None):
         assert dataset_id in params['dataset_configs'], f'Unknown dataset id {dataset_id} given. Please make sure your dataset ids contain that configuration'
         dataset_config = params['dataset_configs'][dataset_id]
 
-        path_key = 'path' if not eval else 'eval_path'
-        path = dataset_config[path_key]
+        if path is None:
+            path_key = 'path' if not eval else 'eval_path'
+            path = dataset_config[path_key]
 
         datasets.append(text_dataset(
             tf.io.gfile.glob(path),

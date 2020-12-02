@@ -9,6 +9,7 @@ from models.utils import biasmask_attn_weights
 from tensorflow.python.ops import resources
 from sample import sample_autoregressive
 from models.gpt2 import gpt2
+from custom_checkpointsaverhook import CustomCheckpointSaverHook
 
 
 def model_fn(features, labels, mode, params):
@@ -226,11 +227,12 @@ def model_fn(features, labels, mode, params):
                 save_relative_paths=True)
             tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
             saver_listener = mtf.MtfCheckpointSaverListener(lowering)
-            saver_hook = tf.train.CheckpointSaverHook(
+            saver_hook = CustomCheckpointSaverHook(
                 params["model_path"],
-                save_steps=params["steps_per_checkpoint"],
+                save_steps=None,
                 saver=saver,
                 listeners=[saver_listener])
+            if params["steps_per_checkpoint"] is not None: print('WARNING: ignoring steps_per_checkpoint in config')
 
             return tpu_estimator.TPUEstimatorSpec(
                 tf.estimator.ModeKeys.TRAIN,

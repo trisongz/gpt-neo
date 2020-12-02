@@ -53,7 +53,7 @@ def main(args):
     params = fetch_model_params(args.model)
 
     # Fetch appropriate input functions
-    input_fn = generic_text
+    
     pred_input_fn = pred_input
     handle_pred_output_fn = handle_pred_output
 
@@ -68,6 +68,7 @@ def main(args):
 
     # Sample from Dataset if check dataset flag is on
     if args.check_dataset:
+        input_fn = generic_text
         check_dataset(input_fn, params)
 
     # Confirm deletion of checkpoint files if --new flag is set
@@ -183,12 +184,20 @@ def main(args):
 
     elif has_predict_or_eval_steps_or_eval_tasks:
         # Eval and train - stop and predict and/or eval every checkpoint
-        while current_step < params["train_steps"]:
-            next_checkpoint = min(current_step + args.steps_per_checkpoint,
-                                  params["train_steps"])
 
-            estimator.train(input_fn=partial(input_fn, eval=False), max_steps=next_checkpoint)
-            current_step = next_checkpoint
+        # only allow single dataset because for deterministic input it doesn't make sense to have multiple
+        # concatenating in particular doesn't make sense since the data wouldn't be interleaved
+        assert len(params['datasets']) == 1
+        tfrecords = tf.io.gfile.glob(params['dataset_configs'][params['datasets'][0][0]])
+
+        for tfrecord_path in tfrecords:
+            # the purpose of this code is to checkpoint only at tfrecord boundaries.
+            input_fn = partial(generic_text, path=tfrecord_path)
+
+            if params["mlm_training"]:
+                input_fn = partial(generic_text, sample_text_fn=mlm_sample_text_fn, path=tfrecord_path)
+
+            estimator.train(input_fn=partial(input_fn, eval=False), max_steps=None)
 
             def save_eval_results(task, eval_results):
                 def as_python(x):

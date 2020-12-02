@@ -229,7 +229,6 @@ def model_fn(features, labels, mode, params):
             saver_listener = mtf.MtfCheckpointSaverListener(lowering)
             saver_hook = CustomCheckpointSaverHook(
                 params["model_path"],
-                save_steps=None,
                 saver=saver,
                 listeners=[saver_listener])
             if params["steps_per_checkpoint"] is not None: print('WARNING: ignoring steps_per_checkpoint in config')

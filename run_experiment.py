@@ -14,6 +14,8 @@ from configs import fetch_model_params
 import socket
 import subprocess
 import queue
+import sys
+import signal
 
 
 parser = argparse.ArgumentParser()
@@ -28,7 +30,7 @@ parser.add_argument('--new', action='store_true')
 parser.add_argument('--test', action='store_true')
 parser.add_argument('--predict', action='store_true')
 parser.add_argument('--no_delete_tpu', action='store_true')
-parser.add_argument('--heartbeat_timeout', type=int, default=300) # kill and restart if nothing logged to tensorboard in this many seconds
+parser.add_argument('--heartbeat_timeout', type=int, default=1800) # kill and restart if nothing logged to tensorboard in this many seconds
 args = parser.parse_args()
 
 params = fetch_model_params(args.model)
@@ -44,7 +46,7 @@ def get_open_port(lo=8000, hi=8100):
                 return i
 
 
-def train_thread(tpu, id, q):
+def train_thread(args, tpu, id, q):
     print('starting training on', tpu)
 
     # pass binary flags through
@@ -57,7 +59,7 @@ def train_thread(tpu, id, q):
         if not args.__getattribute__(flag):
             opts += ' --' + flag
 
-    cmd = "python3 main.py --tpu {tpu} --model run_configs/config_{id}.json --steps_per_checkpoint {steps_per_checkpoint} {opts}".format(tpu=tpu, id=id, steps_per_checkpoint=args.steps_per_checkpoint, opts=opts)
+    cmd = "python3 main.py --tpu {tpu} --model run_configs/config_{id}.json --steps_per_checkpoint {steps_per_checkpoint} {opts} --sacred_id {run_id}".format(tpu=tpu, id=id, steps_per_checkpoint=args.steps_per_checkpoint, opts=opts, run_id=id)
     print('Running:', cmd)
     proc = subprocess.Popen(cmd, shell=True)
 
@@ -65,7 +67,7 @@ def train_thread(tpu, id, q):
     while proc.poll() is None:
         time.sleep(60)
         try:
-            nq, *args = q.get_nowait()
+            nq, *nargs = q.get_nowait()
             if nq == 'kill':
                 print('train thread recieved kill signal from logging thread')
                 # first send SIGTERM
@@ -82,6 +84,9 @@ def train_thread(tpu, id, q):
             pass
 
     print('exited training!')
+    if proc.returncode == 0:
+        print('exited gracefully')
+        os.kill(os.getpid(), signal.SIGINT)
     
     if args.no_delete_tpu:
         print('recreate done, exiting train_thread - not killing tpu!')
@@ -90,6 +95,14 @@ def train_thread(tpu, id, q):
     time.sleep(60)
     os.system("pu recreate {} --yes --retry 3600 --retry-randomness 1.5".format(tpu))
     print('recreate done, exiting train_thread')
+    
+    # clear out queue
+    while True:
+        try:
+            q.get_nowait()
+            print('dropped request in queue after pu recreate')
+        except queue.Empty:
+            break
 
 
 def get_json(uri, params=None, timeout=15):
@@ -122,6 +135,9 @@ def get_run_data(port):
         if '.' in runs:
             if 'loss' in tag_sets['.']:
                 r['loss'] = get_scalar_data(base_uri, '.', 'loss')
+        if 'eval' in runs:
+            if 'loss' in tag_sets['eval']:
+                r['val_loss'] = get_scalar_data(base_uri, 'eval', 'loss')
         if 'eval_lambada' in runs:
             if 'lambada_acc' in tag_sets['eval_lambada']:
                 r['lambada_acc'] = get_scalar_data(base_uri, 'eval_lambada', 'lambada_acc')
@@ -139,6 +155,7 @@ def get_run_data(port):
 @ex.main
 def main(_run):
     print('Starting run', _run._id)
+    print('experiment main invoked with argv:', sys.argv)
     print('WARNING: please remember to remove old metric log files from the model directory.')
 
     os.makedirs('run_configs', exist_ok=True)
@@ -151,11 +168,12 @@ def main(_run):
     atexit.register(goodbye, _run._id)
 
     curr_step = {}
+    seen_predictions = set()
 
     while True:
         last_tb_log_time = time.time()
         q = queue.Queue()
-        trainthd = threading.Thread(target=train_thread, args=(args.tpu, _run._id, q))
+        trainthd = threading.Thread(target=train_thread, args=(args, args.tpu, _run._id, q))
         trainthd.start()
 
         while trainthd.is_alive():
@@ -175,6 +193,28 @@ def main(_run):
                     last_tb_log_time = time.time()
 
                     curr_step[k] = step
+
+            for f in glob.glob('predictions_{}_*'.format(_run._id)):
+                if f in seen_predictions:
+                    continue
+                print('collecting prediction file', f)
+                ex.add_artifact(f)
+                
+                seen_predictions.add(f)
+            
+            # collect eval metrics from jsonl
+            if os.path.exists(f'eval_{_run._id}.jsonl'):
+                with open(f'eval_{_run._id}.jsonl') as fh:
+                    for line in fh:
+                        ob = json.loads(line)
+                        val_step = ob['global_step']
+                        val_task = ob['task']
+                        for metr in ob.keys():
+                            k = 'fs.' + val_task + '.' + metr
+                            if metr in ['task', 'global_step']: continue
+                            if val_step <= curr_step.get(k, -1): continue
+                            _run.log_scalar(k, ob[metr], val_step)
+                            curr_step[k] = val_step
 
             if time.time() - last_tb_log_time > args.heartbeat_timeout:
                 # the run hasn't logged in a while, so we restart it
@@ -198,8 +238,8 @@ def goodbye(id):
 
         
 if __name__ == '__main__':
-    for file in glob.glob("**/*"):
-        if file.split('.')[-1] in ['py']:    
+    for file in glob.glob("**/*", recursive=True):
+        if file.split('.')[-1] in ['py']:
             print('Adding', file, 'to sacred')
             ex.add_source_file(file)
 

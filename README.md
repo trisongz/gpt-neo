@@ -59,7 +59,7 @@ python3 main.py --predict --prompt <example_prompt.txt> --tpu <tpu_name> --model
 or, if using GPUs:
 
 ```bash
-python3 main.py --predict --prompt <example_prompt.txt> --gpu_ids device:GPU:0 device:GPU:1 --model <config_name>
+python3 main.py --predict --prompt <example_prompt.txt> --gpu_ids <device:GPU:0 device:GPU:1> --model <config_name>
 ```
 
 # Training Guide
@@ -210,7 +210,7 @@ python3 main.py --model <your_config_name> --steps_per_checkpoint <n> --tpu <tpu
 - `gpu_ids`: if training using GPUs, omit the `tpu` flag and pass in the ids of your gpus. In the example below, we train on 3 GPUs, specifying their device ids delimited by spaces:
 
 ```
-python3 main.py --model <your_config_name> --steps_per_checkpoint <n> --gpu_ids <0 1 2>
+python3 main.py --model <your_config_name> --steps_per_checkpoint <n> --gpu_ids <device:GPU:0 device:GPU:1>
 ```
 
 # Available Configs
@@ -237,7 +237,7 @@ To use:
 
 2. Run `python3 run_experiment.py --tpu sometpuhere --model someconfig.json` Options are the same as `main.py`. 
 
-3. You can go to http://server_ip_goes_here:8080/ to see the Omniboard overview. If you prefer to see a tensorboard, the script also spins one up and automatically assigns it a port. The script should print out the tensorboard port near the top of the log. 
+3. You can go to http://server_ip_goes_here:8081/ to see the Omniboard overview. If you prefer to see a tensorboard, the script also spins one up and automatically assigns it a port. The script should print out the tensorboard port near the top of the log. 
 
 ## Peeking at a Dataset
 
@@ -263,8 +263,10 @@ In addition to being able to train large GPT's, this repository also allows you 
 That's all you need to train a model with the MLM objective, good for any type of data that you have encoded properly. If you would like to tweak the other related hyperparameters, please continue reading.
 
 ```python
+"mlm_cls_token_id": <cls token id>,                # auto append specified CLS token id on the left
 "mlm_mask_prob": 0.15,                             # the probability of masking a token, defaults to 15%
 "mlm_same_token_prob": 0.10,                       # probability of keeping the token the same, defaults to 10%
+"mlm_random_token_prob": 0.10,                     # probability of tokens that are replaced with random tokens, 10% was recommended by the BERT paper
 "mlm_mask_ignore_ids": [<cls token>, <sep token>]  # ignore masking other special tokens, if any
 ```
 
@@ -304,7 +306,7 @@ Pick a valid config from `/configs` and tweak the parameters as needed:
 - `attention_types`: the type of attention for each layer in a list of the following format [[["attention_type"], n_layers]]. e.g. for a 12 layer net [[["global"], 12]] or [[["local"], 10], [["global"], 2]].
     + Choose from: `linear`, `global`, `local` or `none`. We have found a 50/50 mix of `global` and `linear` to work well. `none` allows you to create feed-forward only layers for more efficient [PAR Transformer](https://arxiv.org/abs/2009.04534) models.
 - `precision`: `float32` or `bfloat16`.
-- `tokens_per_mb_per_replica`: If not None, will split the batch up into smaller microbatches containing `tokens_per_mb_per_replica` tokens to avoid OOMs. Gradients are accumulated locally and reduced once.
+- `tokens_per_mb_per_replica`: If not None, will split the batch up into smaller microbatches containing `tokens_per_mb_per_replica` tokens to avoid OOMs. Gradients are accumulated locally and reduced once. IMPORTANT: mb refers to *minibatch* not megabyte here. 
 
 **Mixture of Experts**
 

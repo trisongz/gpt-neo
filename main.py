@@ -13,6 +13,8 @@ from data.encoders import fetch_encoder
 from configs import fetch_model_params
 from tasks import task_descriptors
 import argparse
+import json
+import numpy
 
 
 def parse_args():
@@ -31,11 +33,13 @@ def parse_args():
     parser.add_argument("--new", action="store_true", help="If set, deletes previous checkpoint, if it exists, and "
                                                            "starts a new training run")
     parser.add_argument("--predict", action="store_true", help="If set, uses the model to predict rather than train.")
+    parser.add_argument("--eval", action="store_true", help="If set, run model in evaluation mode.")
     parser.add_argument("--prompt", type=str, help="path to .txt file containing a prompt for prediction. If empty, "
                                                    "defaults to unicorns.",
                         default="")
     parser.add_argument("--check_dataset", action="store_true",
                         help="If set, outputs sample from the dataset and quits.")
+    parser.add_argument("--sacred_id", type=str, default="nosacred", help="Sacred run id.")
     args = parser.parse_args()
     assert args.model is not None, "Model must be set"
     return args
@@ -64,7 +68,7 @@ def main(args):
 
     # Sample from Dataset if check dataset flag is on
     if args.check_dataset:
-        check_dataset(input_fn)
+        check_dataset(input_fn, params)
 
     # Confirm deletion of checkpoint files if --new flag is set
     if args.new:
@@ -142,7 +146,7 @@ def main(args):
             model_fn=model_fn,
             config=config,
             train_batch_size=params["train_batch_size"],
-            eval_batch_size=params["train_batch_size"],
+            eval_batch_size=params["eval_batch_size"],
             predict_batch_size=params["predict_batch_size"],
             params=task_params)
 
@@ -159,8 +163,23 @@ def main(args):
         predictions = estimator.predict(input_fn=pred_input_fn)
         logger.info("Predictions generated")
         enc = fetch_encoder(params)
-        handle_pred_output_fn(predictions, logger, enc, params, out_name=f"predictions_{current_step}")
+        handle_pred_output_fn(predictions, logger, enc, params, out_name=f"predictions_{args.sacred_id}_{current_step}")
         return
+
+
+    if args.eval:
+        for task in eval_tasks:
+            logger.info(f"Starting evaluation task '{task}'")
+            task_info = task_descriptors[task]["get_task_info_fn"](params)
+            task_estimator = eval_task_estimators[task]
+            task_input_fn = task_descriptors[task]["input_fn"]
+            eval_results = task_estimator.evaluate(
+                input_fn=task_input_fn,
+                steps=task_info["n_steps"],
+                name=task)
+            logger.info(f"Eval task '{task}' results: {eval_results}")
+        return
+
 
     elif has_predict_or_eval_steps_or_eval_tasks:
         # Eval and train - stop and predict and/or eval every checkpoint
@@ -171,11 +190,21 @@ def main(args):
             estimator.train(input_fn=partial(input_fn, eval=False), max_steps=next_checkpoint)
             current_step = next_checkpoint
 
+            def save_eval_results(task, eval_results):
+                def as_python(x):
+                     if isinstance(x, numpy.generic):
+                        return x.item()
+                     return x
+                eval_results = {k: as_python(v) for k, v in eval_results.items()}
+                with open(f'eval_{args.sacred_id}.jsonl', 'a') as fh:
+                    json.dump({'task': task, 'current_step': current_step, **eval_results}, fh)
+                    fh.write('\n')
+
             if params["predict_steps"] > 0:
                 logger.info("Running prediction...")
                 predictions = estimator.predict(input_fn=pred_input_fn)
                 enc = fetch_encoder(params)
-                handle_pred_output_fn(predictions, logger, enc, params, out_name=f"predictions_{current_step}")
+                handle_pred_output_fn(predictions, logger, enc, params, out_name=f"predictions_{args.sacred_id}_{current_step}")
 
             if params["eval_steps"] > 0:
                 logger.info("Running evaluation...")
@@ -183,6 +212,7 @@ def main(args):
                     input_fn=partial(input_fn, eval=True),
                     steps=params["eval_steps"])
                 logger.info(f"Eval results: {eval_results}")
+                save_eval_results('validation', eval_results)
 
             for task in eval_tasks:
                 logger.info(f"Starting evaluation task '{task}'")
@@ -194,6 +224,8 @@ def main(args):
                     steps=task_info["n_steps"],
                     name=task)
                 logger.info(f"Eval task '{task}' results: {eval_results}")
+                save_eval_results(task, eval_results)
+                
         return
     else:
         # Else, just train

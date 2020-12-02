@@ -30,8 +30,6 @@ class CustomCheckpointSaverHook(session_run_hook.SessionRunHook):
 
   def __init__(self,
                checkpoint_dir,
-               save_secs=None,
-               save_steps=None,
                saver=None,
                checkpoint_basename="model.ckpt",
                scaffold=None,

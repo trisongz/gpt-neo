@@ -28,7 +28,8 @@ def generic_text(params, eval=False, sample_text_fn=None, path=None):
             stitch = stitch,
             datatype = datatype,
             batch = False,
-            sample_text_fn = sample_text_fn
+            sample_text_fn = sample_text_fn,
+            repeat=False
         ))
 
         weights.append(weight)
@@ -40,7 +41,7 @@ def generic_text(params, eval=False, sample_text_fn=None, path=None):
     dataset = dataset.batch(batch_size, drop_remainder=True).prefetch(params["iterations"] * 2)
     return dataset
 
-def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
+def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None, repeat=True):
     seed = params.get('seed', None)
     deterministic =  seed is not None
     num_parallel_calls = 1 if deterministic else tf.data.experimental.AUTOTUNE
@@ -108,7 +109,8 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
     if batch:
         dataset = dataset.batch(params["train_batch_size"], drop_remainder=True).prefetch(params["iterations"] * 2)
 
-    dataset = dataset.repeat()
+    if repeat:
+        dataset = dataset.repeat()
 
     return dataset
 

@@ -15,6 +15,7 @@ from tasks import task_descriptors
 import argparse
 import json
 import numpy
+import natsort
 
 
 def parse_args():
@@ -188,7 +189,9 @@ def main(args):
         # only allow single dataset because for deterministic input it doesn't make sense to have multiple
         # concatenating in particular doesn't make sense since the data wouldn't be interleaved
         assert len(params['datasets']) == 1
-        tfrecords = tf.io.gfile.glob(params['dataset_configs'][params['datasets'][0][0]])
+        tfrecords = natsort.natsorted(tf.io.gfile.glob(params['dataset_configs'][params['datasets'][0][0]]['path']))
+
+        print('tfrecords:', tfrecords)
 
         for tfrecord_path in tfrecords:
             # the purpose of this code is to checkpoint only at tfrecord boundaries.
@@ -197,7 +200,7 @@ def main(args):
             if params["mlm_training"]:
                 input_fn = partial(generic_text, sample_text_fn=mlm_sample_text_fn, path=tfrecord_path)
 
-            estimator.train(input_fn=partial(input_fn, eval=False), max_steps=None)
+            estimator.train(input_fn=partial(input_fn, eval=False), max_steps=10**100)
 
             def save_eval_results(task, eval_results):
                 def as_python(x):

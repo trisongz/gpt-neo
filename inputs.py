@@ -37,20 +37,28 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
     seed = params.get('seed', None)
     dataset = tf.data.experimental.sample_from_datasets(datasets, weights=weights, seed=seed)
     dataset = dataset.batch(batch_size, drop_remainder=True).prefetch(params["iterations"] * 2)
+    
+    # before skipping, make sure the code is deterministic!
+    # according to https://www.tensorflow.org/api_docs/python/tf/data/experimental/parallel_interleave
+    # the code should always be deterministic. Leaving this here for ease of modification later
+    # if step > 0:
+    #    assert(params.get('seed', None) is not None)
     dataset = dataset.skip(step)
+    
     return dataset
 
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
     seed = params.get('seed', None)
-    deterministic =  seed is not None # what `deterministic` really does is mark if the code should be run in parallel
-    num_parallel_calls = 1 if deterministic else tf.data.experimental.AUTOTUNE
+    single_thread =  seed is not None # I'm not sure why, but `seed` appears be None when we multithread input processing
+    num_parallel_calls = 1 if single_thread else tf.data.experimental.AUTOTUNE
 
     dataset = tf.data.Dataset.from_tensor_slices(files)
 
-    if deterministic:
+    if single_thread:
         dataset = dataset.interleave(tf.data.TFRecordDataset, cycle_length=4)
     else:
         dataset = dataset.apply(
+            # sloppy=False ensures that parallel_interleave remains deterministic.
             tf.data.experimental.parallel_interleave(tf.data.TFRecordDataset, cycle_length=4, sloppy=False))
 
     if "documents" in datatype:

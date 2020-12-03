@@ -37,29 +37,16 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
     seed = params.get('seed', None)
     dataset = tf.data.experimental.sample_from_datasets(datasets, weights=weights, seed=seed)
     dataset = dataset.batch(batch_size, drop_remainder=True).prefetch(params["iterations"] * 2)
-    
-    # before skipping, make sure the code is deterministic!
-    # according to https://www.tensorflow.org/api_docs/python/tf/data/experimental/parallel_interleave
-    # the code should always be deterministic. Leaving this here for ease of modification later
-    # if step > 0:
-    #    assert(params.get('seed', None) is not None)
     dataset = dataset.skip(step)
     
     return dataset
 
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
-    seed = params.get('seed', None)
-    threads = params.get('threads', 1)
-    deterministic = True if seed is None else False
-
+    
     dataset = tf.data.Dataset.from_tensor_slices(files)
-
-    if threads == 1:
-        dataset = dataset.interleave(tf.data.TFRecordDataset, cycle_length=4)
-    else:
-        dataset = dataset.apply(
+    dataset = dataset.apply(
             # sloppy=False ensures that parallel_interleave remains deterministic.
-            tf.data.experimental.parallel_interleave(tf.data.TFRecordDataset, cycle_length=4, sloppy=(not deterministic))
+            tf.data.experimental.parallel_interleave(tf.data.TFRecordDataset, cycle_length=4, sloppy=False)
 
     if "documents" in datatype:
         def _parse_function(example_proto):
@@ -102,7 +89,6 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
 
         dataset = dataset.shuffle(1000 * stitch, seed=seed).batch(stitch, drop_remainder=True).map(_stitch_text,
                                                                                         num_parallel_calls=threads)
-
         # Sample 1024(+1) tokens from the stitched together text
         is_random_documents = datatype == "documents_random"
         if sample_text_fn is not None:

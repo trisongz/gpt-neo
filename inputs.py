@@ -49,17 +49,17 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
 
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
     seed = params.get('seed', None)
-    single_thread =  seed is not None # I'm not sure why, but `seed` appears be None when we multithread input processing
-    num_parallel_calls = 1 if single_thread else tf.data.experimental.AUTOTUNE
+    threads = params.get('threads', 1)
+    deterministic = True if seed is None else False
 
     dataset = tf.data.Dataset.from_tensor_slices(files)
 
-    if single_thread:
+    if threads == 1:
         dataset = dataset.interleave(tf.data.TFRecordDataset, cycle_length=4)
     else:
         dataset = dataset.apply(
             # sloppy=False ensures that parallel_interleave remains deterministic.
-            tf.data.experimental.parallel_interleave(tf.data.TFRecordDataset, cycle_length=4, sloppy=False))
+            tf.data.experimental.parallel_interleave(tf.data.TFRecordDataset, cycle_length=4, sloppy=(not deterministic))
 
     if "documents" in datatype:
         def _parse_function(example_proto):
@@ -77,7 +77,7 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
             parsed_features = tf.parse_single_example(example_proto, features)
             return parsed_features["text"]  # Assuming the text is not sparse
 
-    dataset = dataset.map(_parse_function, num_parallel_calls=1)
+    dataset = dataset.map(_parse_function, num_parallel_calls=threads)
 
     # Subsample method
     if "documents" in datatype:
@@ -101,7 +101,7 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
         # Hack-y way to stitch together multiple texts
 
         dataset = dataset.shuffle(1000 * stitch, seed=seed).batch(stitch, drop_remainder=True).map(_stitch_text,
-                                                                                        num_parallel_calls=num_parallel_calls)
+                                                                                        num_parallel_calls=threads)
 
         # Sample 1024(+1) tokens from the stitched together text
         is_random_documents = datatype == "documents_random"
@@ -111,7 +111,7 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
             _sample_text = autoregressive_sample_text_random_documents if is_random_documents else autoregressive_sample_text
             _sample_text = partial(_sample_text, params)
 
-        dataset = dataset.map(_sample_text, num_parallel_calls=num_parallel_calls)
+        dataset = dataset.map(_sample_text, num_parallel_calls=threads)
 
     if batch:
         dataset = dataset.batch(params["train_batch_size"], drop_remainder=True).prefetch(params["iterations"] * 2)

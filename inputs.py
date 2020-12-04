@@ -43,35 +43,16 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
 
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
     
-    dataset = tf.data.Dataset.from_tensor_slices(files)
-    dataset = dataset.apply(
-            # sloppy=False ensures that parallel_interleave remains deterministic.
-            tf.data.experimental.parallel_interleave(tf.data.TFRecordDataset, cycle_length=4, sloppy=False)
-
-    if "documents" in datatype:
-        def _parse_function(example_proto):
-            features = {
-                # "hash": tf.VarLenFeature(tf.string),
-                "text": tf.VarLenFeature(tf.int64)
-            }
-            parsed_features = tf.parse_single_example(example_proto, features)
-            return parsed_features["text"], parsed_features["text"].dense_shape[0]
-    else:
-        def _parse_function(example_proto):
-            features = {
-                "text": tf.VarLenFeature(tf.int64)
-            }
-            parsed_features = tf.parse_single_example(example_proto, features)
-            return parsed_features["text"]  # Assuming the text is not sparse
-
-    dataset = dataset.map(_parse_function, num_parallel_calls=threads)
-
+    file_list = tf.data.Dataset.from_tensor_slices(files)
+    dataset = file_list.interleave(lambda x: tf.data.TFRecordDataset(x), cycle_length=4, sloppy=False)
+    dataset.interleave(tf.parse_single_example(example_proto, {"text": tf.VarLenFeature(tf.int64)})["text"], num_parallel_calls=threads)
+    
     # Subsample method
     if "documents" in datatype:
         # Since samples can be less than the correct length, and TPUs don't like variable lengths, this function stitches together enough samples
         # to have a text at least 1024 tokens long. For this to work the stitch parameter must be correctly tuned so that
         # stitch * min(characters_in_text) >= amount
-        def _stitch_text(x, y):
+        def _stitch_text(x, y): # x is the dataset, y is the shape of the dataset
             x = tf.sparse.to_dense(x)
 
             def _get_x(i):

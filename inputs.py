@@ -45,7 +45,12 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
     
     file_list = tf.data.Dataset.from_tensor_slices(files)
     dataset = file_list.interleave(lambda x: tf.data.TFRecordDataset(x), cycle_length=4, sloppy=False)
-    dataset.interleave(tf.parse_single_example(example_proto, {"text": tf.VarLenFeature(tf.int64)})["text"], num_parallel_calls=threads)
+    
+    def _parse(example_proto):
+        doc = tf.parse_single_example(example_proto, {"text": tf.VarLenFeature(tf.int64)})["text"]
+        return doc, doc.dense_shape[0]
+    
+    dataset = dataset.interleave(_parse, num_parallel_calls=1)
     
     # Subsample method
     if "documents" in datatype:
@@ -69,7 +74,7 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
         # Hack-y way to stitch together multiple texts
 
         dataset = dataset.shuffle(1000 * stitch, seed=seed).batch(stitch, drop_remainder=True).map(_stitch_text,
-                                                                                        num_parallel_calls=threads)
+                                                                                        num_parallel_calls=1)
         # Sample 1024(+1) tokens from the stitched together text
         is_random_documents = datatype == "documents_random"
         if sample_text_fn is not None:
@@ -78,7 +83,7 @@ def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=Non
             _sample_text = autoregressive_sample_text_random_documents if is_random_documents else autoregressive_sample_text
             _sample_text = partial(_sample_text, params)
 
-        dataset = dataset.map(_sample_text, num_parallel_calls=threads)
+        dataset = dataset.map(_sample_text, num_parallel_calls=1)
 
     if batch:
         dataset = dataset.batch(params["train_batch_size"], drop_remainder=True).prefetch(params["iterations"] * 2)

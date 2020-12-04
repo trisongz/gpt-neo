@@ -44,13 +44,13 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
     
     file_list = tf.data.Dataset.from_tensor_slices(files)
-    dataset = file_list.interleave(lambda x: tf.data.TFRecordDataset(x), cycle_length=4, sloppy=False)
-    
+    dataset = file_list.interleave(lambda x: tf.data.TFRecordDataset(x), cycle_length=4)
+
     def _parse(example_proto):
         doc = tf.parse_single_example(example_proto, {"text": tf.VarLenFeature(tf.int64)})["text"]
         return doc, doc.dense_shape[0]
     
-    dataset = dataset.interleave(_parse, num_parallel_calls=1)
+    dataset = dataset.map(_parse, num_parallel_calls=1)
     
     # Subsample method
     if "documents" in datatype:

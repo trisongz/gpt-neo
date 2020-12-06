@@ -37,7 +37,7 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
     seed = params.get('seed', None)
     dataset = tf.data.experimental.sample_from_datasets(datasets, weights=weights, seed=seed)
     dataset = dataset.batch(batch_size, drop_remainder=True).prefetch(params["iterations"] * 2)
-    #dataset = dataset.skip(step)
+    dataset = dataset.skip(step)
     
     return dataset
 

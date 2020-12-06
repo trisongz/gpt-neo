@@ -43,6 +43,8 @@ def generic_text(params, eval=False, sample_text_fn=None, step=0):
 
 def text_dataset(files, params, stitch, datatype, batch=True, sample_text_fn=None):
     
+    seed = None
+    
     file_list = tf.data.Dataset.from_tensor_slices(files)
     dataset = file_list.interleave(tf.data.TFRecordDataset, cycle_length=4)
 

@@ -33,7 +33,8 @@ def generic_text(params, eval=False, sample_text_fn=None, path=None):
         ))
 
         weights.append(weight)
-
+        print(path)
+    print("done with loop")
     batch_size = params['eval_batch_size' if eval else 'train_batch_size']
 
     seed = params.get('seed', None)

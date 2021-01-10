@@ -174,10 +174,12 @@ def attn(x, scope, n_state, *, attention_type, params, bias, dim_seq, memory_len
             heads_dim=dim_heads,
             variable_dtype=variable_dtype
         )
-        q = mtfparams.compute_q(x)
-        k = mtfparams.compute_k(x)
-        v = mtfparams.compute_v(x)
 
+        qk_activation = 'gelu'
+        q = get_activation_fn(qk_activation)(mtfparams.compute_q(x))
+        k = get_activation_fn(qk_activation)(mtfparams.compute_k(x))
+        v = get_activation_fn('id')(mtfparams.compute_v(x))
+        
         if is_incremental_inference(context):
             one_hot = mtf.one_hot(context.position - 1, dim_seq, dtype=variable_dtype.master_dtype)
             inv_one_hot = 1.0 - one_hot

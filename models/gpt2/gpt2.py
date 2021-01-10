@@ -264,10 +264,7 @@ def attn(x, scope, n_state, *, attention_type, params, bias, dim_seq, memory_len
         return a
 
 
-def get_activation_fn(params):
-    activation_fn = params.get("activation_fn", "gelu")
-    
-    
+def get_activation_fn(activation_fn):
     def _arcsinh(x):
         return mtf.log(x + mtf.sqrt(1 + x ** 2))
     def _var(x, init):
@@ -384,7 +381,7 @@ def get_activation_fn(params):
         raise ValueError('unknown activation function "activation_fn" in config')
 
 def mlp(x, scope, n_state, *, variable_dtype, params):
-    activation_fn = get_activation_fn(params)
+    activation_fn = get_activation_fn(params.get("activation_fn", "gelu"))
     with tf.variable_scope(scope):
         nx = x.shape[-1]
         h = activation_fn(linear(x, "c_fc", n_state, variable_dtype=variable_dtype, params=params))
@@ -395,7 +392,7 @@ def mlp(x, scope, n_state, *, variable_dtype, params):
 
 
 def mlp_glu(x, scope, n_state, *, variable_dtype, params):
-    activation_fn = get_activation_fn(params)
+    activation_fn = get_activation_fn(params.get("activation_fn", "gelu"))
     with tf.variable_scope(scope):
         nx = x.shape[-1]
         h = linear(x, "c_fc", n_state, params=params)

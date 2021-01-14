@@ -465,11 +465,10 @@ def block(params, scope, layer_num, bias, sequence_dim, memory_length_dim, varia
 
                 moe_train = params["mode"] == "train"
 
-                m, aux_loss = mtf.transformer.moe.transformer_moe_layer_v1(res_x, x.shape[-1], moe_params,
+                m, aux_loss = mtf.transformer.moe.transformer_moe_layer_v2(res_x, x.shape[-1], moe_params,
                                                                            train=moe_train,
                                                                            mesh_shape=params["mesh_shape"],
                                                                            layout=params["layout"],
-                                                                           activation=params.get("moe_activation", "relu"),
                                                                            variable_dtype=variable_dtype,
                                                                            num_microbatches=params["num_microbatches"])
                 m = mtf.dropout(m, rate=params["res_dropout"], name="moe_dropout")
